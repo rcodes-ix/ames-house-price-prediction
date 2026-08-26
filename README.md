@@ -257,7 +257,7 @@ ames-housing-price-regression/
 │   ├── test.csv
 │   └── data_description.txt
 │
-├── price_regression_prediction_intervals.ipynb
+├── house-price-prediction.ipynb
 │
 ├── README.md
 │
