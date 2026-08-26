@@ -322,33 +322,5 @@ The strong skew in raw house prices can be substantially reduced using a logarit
 
 Keeping preprocessing and modeling inside a single pipeline makes it easier to ensure that transformations are consistently applied and prevents accidental leakage during cross-validation.
 
----
 
-## Future Improvements
 
-Potential future improvements include:
-
-- Hyperparameter optimization
-- More advanced feature engineering
-- Model calibration
-- More detailed interval diagnostics
-- Error analysis by neighborhood and house characteristics
-- Model interpretation
-- Deployment as an API
-- Interactive prediction interface
-
----
-
-## Author
-
-**Rekik Samson**
-
-GitHub: [https://github.com/rcodes-ix](https://github.com/rcodes-ix)
-
----
-
-This project is being developed incrementally, with each major machine learning component implemented, evaluated, and documented throughout the development process.
-
-```
-
-```
