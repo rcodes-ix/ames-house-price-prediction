@@ -396,4 +396,5 @@ The project focuses on building the modeling pipeline rather than redistributing
 
 ## License
 
-See the repository's license file for licensing information.
+This project is licensed under the MIT License.
+See the LICENSE file for the full license text.
