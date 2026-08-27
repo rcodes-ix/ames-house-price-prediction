@@ -1,94 +1,47 @@
-# Ames Housing Price Regression with Prediction Intervals
+# Ames House Price Prediction
 
-A production-oriented house price regression project built around the Ames Housing dataset.
+A machine learning regression pipeline for predicting residential house prices using the Ames Housing dataset.
 
-The project focuses not only on predicting house prices, but on building a **leak-proof machine learning pipeline** and producing **prediction intervals** that communicate uncertainty around each prediction.
+The project goes beyond a single regression model by combining **leak-resistant preprocessing, multiple regression algorithms, out-of-fold stacking, and quantile regression for prediction intervals**.
 
----
-
-## Project Overview
-
-House price prediction is often presented as a simple regression problem: given information about a house, predict its sale price.
-
-This project goes further.
-
-The goal is to build a robust regression system that:
-
-- Handles numerical and categorical features safely
-- Prevents data leakage during preprocessing
-- Uses target encoding for categorical variables
-- Trains multiple base regression models
-- Generates honest out-of-fold predictions
-- Combines base models using a stacked ensemble
-- Uses quantile regression to estimate prediction intervals
-- Evaluates predictions using RMSE on log-transformed sale prices
-- Produces both point estimates and uncertainty intervals
-
-The project uses the **Ames Housing dataset** from Kaggle's House Prices: Advanced Regression Techniques competition.
+The final stacking ensemble achieved an **R² of 0.9198** on the held-out test set.
 
 ---
 
-## Problem Statement
+## Overview
 
-Given a set of characteristics describing a residential property, predict its sale price while also estimating the uncertainty associated with the prediction.
+Predicting house prices is a regression problem where the target variable can be highly skewed and the dataset contains both numerical and categorical features with missing values.
 
-Instead of returning only:
+This project builds a complete end-to-end regression workflow that:
+
+* Handles missing numerical and categorical values
+* Encodes categorical variables using target encoding
+* Standardizes numerical features
+* Applies a log transformation to the target
+* Trains and compares multiple regression models
+* Generates out-of-fold predictions
+* Combines models using a stacking ensemble
+* Estimates 90% prediction intervals using quantile regression
+* Calibrates the prediction intervals using validation data
+* Evaluates the final system on an untouched test set
+
+The goal is not only to predict a house's price, but also to estimate **how uncertain that prediction is**.
+
+---
+
+## Project Goals
+
+The project focuses on three main objectives:
+
+1. Build a reliable house-price regression pipeline.
+2. Improve predictive performance through ensemble learning.
+3. Provide prediction intervals instead of only point estimates.
+
+This makes the system more informative than a model that simply outputs:
 
 > Predicted price: $250,000
 
-the final system aims to produce something conceptually like:
-
-> Predicted price: $250,000  
-> Prediction interval: $220,000 – $285,000
-
-This makes the output more useful for decision-making because it communicates not only the expected value, but also the range of plausible outcomes.
-
----
-
-## Objectives
-
-The main objectives of this project are:
-
-1. Build a leak-proof preprocessing pipeline.
-2. Handle missing numerical and categorical values inside the pipeline.
-3. Apply target encoding to categorical features.
-4. Train multiple regression models.
-5. Generate out-of-fold predictions without leakage.
-6. Build a stacked regression ensemble.
-7. Train quantile regression models.
-8. Produce prediction intervals rather than only point predictions.
-9. Evaluate the final system using appropriate regression metrics.
-10. Document the complete machine learning workflow.
-
----
-
-## Dataset
-
-The project uses the Ames Housing dataset from Kaggle:
-
-**House Prices: Advanced Regression Techniques**
-
-https://www.kaggle.com/competitions/house-prices-advanced-regression-techniques
-
-The Kaggle training dataset contains:
-
-- 1,460 houses
-- 79 explanatory features
-- 1 target variable: `SalePrice`
-
-The features contain a mixture of numerical and categorical variables describing characteristics such as:
-
-- Overall quality
-- Living area
-- Neighborhood
-- Year built
-- Garage characteristics
-- Basement characteristics
-- Kitchen quality
-- Lot characteristics
-- And many other property attributes
-
-The raw dataset is not included in this repository.
+Instead, the final system can provide a prediction together with an estimated range of plausible prices.
 
 ---
 
@@ -96,231 +49,351 @@ The raw dataset is not included in this repository.
 
 ### 1. Data Preparation
 
-The raw training data is separated into:
+The Ames Housing dataset contains approximately 2,900 residential properties and a mixture of numerical and categorical features.
 
-- Features `X`
-- Target `SalePrice`
+The `Id` column is removed because it is an identifier rather than a meaningful predictive feature.
 
-The `Id` column is removed because it is an identifier rather than a meaningful property characteristic.
-
-### 2. Target Transformation
-
-House prices are strongly right-skewed.
-
-The target is transformed using:
+The target variable is transformed using:
 
 ```python
-np.log1p(SalePrice)
+y_log = np.log1p(y)
 ```
 
-Models are trained on the transformed target.
-
-Predictions can be converted back to the original price scale using:
-
-```python
-np.expm1(prediction)
-```
-
-The primary evaluation metric is RMSE on the log-transformed target.
-
-### 3. Leak-Proof Preprocessing
-
-Preprocessing is implemented using scikit-learn `Pipeline` and `ColumnTransformer`.
-
-Numerical features use:
-
-- Median imputation
-- Standard scaling
-
-Categorical features use:
-
-- Missing-value handling
-- Target encoding
-
-The preprocessing steps are fitted only on the appropriate training data during model training and cross-validation.
-
-This is important because preprocessing the entire dataset before cross-validation can introduce information leakage.
-
-### 4. Baseline Model
-
-An ElasticNet regression model is used as an initial baseline.
-
-The baseline establishes a reference point against which more complex models can be compared.
-
-### 5. Base Models
-
-Multiple regression models will be trained and evaluated.
-
-The base models are intended to capture different relationships within the data.
-
-### 6. Out-of-Fold Predictions
-
-The stacking system will use out-of-fold predictions.
-
-Instead of training a meta-model on predictions generated from data that the base model has already seen, each training observation receives a prediction from a model that did not train on that observation.
-
-This creates honest meta-features for the stacking model.
-
-### 7. Stacked Ensemble
-
-The out-of-fold predictions from the base models are used as inputs to a meta-model.
-
-Conceptually:
-
-```text
-                    Training Data
-                         |
-          +--------------+--------------+
-          |              |              |
-      Base Model 1   Base Model 2   Base Model 3
-          |              |              |
-          +--------------+--------------+
-                         |
-                OOF Predictions
-                         |
-                         v
-                  Meta Model
-                         |
-                         v
-                 Final Prediction
-```
-
-### 8. Quantile Regression
-
-Quantile regression is used to estimate prediction intervals.
-
-The project will train models for different quantiles, such as:
-
-- Lower quantile
-- Median
-- Upper quantile
-
-For example:
-
-```text
-Lower Quantile ───────────────┐
-                              |
-Median Prediction ────────────┼──> Prediction output
-                              |
-Upper Quantile ───────────────┘
-```
-
-The final system can therefore provide both:
-
-- A point estimate
-- An uncertainty interval
-
-### 9. Prediction Intervals
-
-The prediction interval will be evaluated using measures such as:
-
-- Coverage
-- Interval width
-- Calibration
-
-The goal is not simply to create a wide interval that contains almost every house price.
-
-A useful interval should provide a reasonable balance between:
-
-**Coverage**
-
-and
-
-**Sharpness / interval width**
+This reduces the strong right skew in the original `SalePrice` distribution and allows the models to work with a more stable target distribution.
 
 ---
 
-## Evaluation
+### 2. Train / Validation / Test Split
 
-The primary regression metric is:
+The dataset is divided into:
 
-### RMSE on log-transformed SalePrice
+* **70% training**
+* **15% validation**
+* **15% test**
 
-Additional metrics and diagnostics will be used to understand model performance.
+The validation set is used during model development and calibration.
 
-For prediction intervals, the project will evaluate:
+The test set remains untouched until the final evaluation.
 
-- Prediction interval coverage
-- Average interval width
-- Quantile behavior
-- Calibration
+---
+
+### 3. Preprocessing
+
+The preprocessing pipeline uses `ColumnTransformer` and separate transformations for numerical and categorical features.
+
+#### Numerical features
+
+```text
+Median imputation
+        ↓
+StandardScaler
+```
+
+#### Categorical features
+
+```text
+Missing-value imputation
+        ↓
+Target encoding
+```
+
+The preprocessing steps are contained inside scikit-learn pipelines so that transformations are learned from the appropriate training data rather than manually applied beforehand.
+
+---
+
+## Models
+
+Three base regression models were trained:
+
+### ElasticNet
+
+Used as the regularized linear baseline.
+
+```text
+ElasticNet
+alpha = 0.0005
+l1_ratio = 0.5
+```
+
+### Random Forest
+
+An ensemble of decision trees used to capture nonlinear relationships.
+
+```text
+n_estimators = 500
+max_features = sqrt
+```
+
+### Gradient Boosting
+
+A sequential boosting model designed to capture complex nonlinear relationships.
+
+```text
+n_estimators = 500
+learning_rate = 0.03
+max_depth = 3
+```
+
+---
+
+## Stacking Ensemble
+
+Instead of selecting only one base model, the project combines their predictions.
+
+First, **5-fold out-of-fold predictions** are generated for:
+
+* ElasticNet
+* Random Forest
+* Gradient Boosting
+
+These predictions become the input features for a second-level linear regression model.
+
+```text
+ElasticNet ───────┐
+                  │
+Random Forest ────┼──→ Linear Regression → Final Prediction
+                  │
+Gradient Boosting ┘
+```
+
+This allows the final model to learn how to combine the strengths of the individual models.
+
+---
+
+## Final Test Performance
+
+The final stacking ensemble was evaluated on the untouched test set.
+
+| Metric                 |         Result |
+| ---------------------- | -------------: |
+| **R²**                 |     **0.9198** |
+| **Variance explained** |     **91.98%** |
+| **RMSE**               | **$24,473.46** |
+| **MAE**                | **$14,282.78** |
+
+### What does this mean?
+
+The model explains approximately **91.98% of the variance in the log-transformed house prices** on the held-out test set.
+
+The MAE of approximately **$14.3K** means that the model's average absolute prediction error was about $14,283 on the original price scale.
+
+---
+
+## Prediction Intervals
+
+A point prediction alone does not communicate uncertainty.
+
+To address this, the project trains two additional Gradient Boosting models using quantile regression:
+
+```text
+5th percentile  → Lower bound
+95th percentile → Upper bound
+```
+
+Together these form a **nominal 90% prediction interval**.
+
+### Calibration
+
+The original interval achieved:
+
+```text
+Validation coverage: 82.65%
+```
+
+A calibration step expanded the interval based on validation residuals:
+
+```text
+Original coverage:
+82.65%
+
+Calibrated validation coverage:
+89.95%
+```
+
+The calibrated interval was then evaluated on the untouched test set.
+
+### Final test interval results
+
+| Metric                  |         Result |
+| ----------------------- | -------------: |
+| Nominal coverage        |        **90%** |
+| Empirical test coverage |     **86.76%** |
+| Mean interval width     | **$77,454.50** |
+| Median interval width   | **$63,671.09** |
+
+The **86.76% test coverage** is the empirical coverage observed on the held-out test set. It should not be interpreted as a guarantee that 90% of future predictions will fall inside the interval.
+
+---
+
+## Tech Stack
+
+* Python
+* NumPy
+* pandas
+* scikit-learn
+* category_encoders
+* Matplotlib
+* Jupyter Notebook
+
+### Key techniques
+
+* Log transformation
+* Missing-value imputation
+* Standardization
+* Target encoding
+* ElasticNet regression
+* Random Forest regression
+* Gradient Boosting regression
+* K-fold cross-validation
+* Out-of-fold predictions
+* Stacking ensemble
+* Quantile regression
+* Prediction interval calibration
+* RMSE
+* MAE
+* R²
 
 ---
 
 ## Project Structure
 
 ```text
-ames-housing-price-regression/
+ames-house-price-prediction/
 │
 ├── data/
-│   ├── train.csv
-│   ├── test.csv
-│   └── data_description.txt
+│   └── train.csv
 │
 ├── house_price_prediction.ipynb
 │
 ├── README.md
 │
-└── .gitignore
+└── ...
 ```
 
-The dataset is intentionally excluded from version control.
+> The dataset is not included in this repository if it is subject to the original dataset's distribution terms. Download it separately and place the required file inside the `data/` directory.
 
 ---
 
-## Technologies
+## Getting Started
 
-- Python
-- NumPy
-- Pandas
-- Matplotlib
-- Scikit-learn
-- Category Encoders
-- LightGBM
-- Jupyter Notebook
-- Git
-- GitHub
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/rcodes-ix/ames-house-price-prediction.git
+cd ames-house-price-prediction
+```
+
+### 2. Create a virtual environment
+
+```bash
+python -m venv myenv
+```
+
+Activate it on Linux/macOS:
+
+```bash
+source myenv/bin/activate
+```
+
+On Windows:
+
+```bash
+myenv\Scripts\activate
+```
+
+### 3. Install dependencies
+
+```bash
+pip install numpy pandas matplotlib scikit-learn category_encoders jupyter
+```
+
+### 4. Add the dataset
+
+Place the training dataset at:
+
+```text
+data/train.csv
+```
+
+### 5. Run the notebook
+
+```bash
+jupyter notebook
+```
+
+Open:
+
+```text
+house_price_prediction.ipynb
+```
+
+and run the cells from top to bottom.
 
 ---
 
-## Learning Goals
+## Evaluation Philosophy
 
-This project is being developed as a hands-on machine learning engineering exercise.
+A major focus of this project is avoiding misleading evaluation.
 
-The main concepts being practiced are:
+The workflow separates:
 
-- Regression
-- Feature preprocessing
-- Pipeline design
-- ColumnTransformer
-- Target encoding
-- Cross-validation
-- Out-of-fold predictions
-- Ensemble learning
-- Stacking
-- Quantile regression
-- Prediction intervals
-- Model evaluation
-- Data leakage prevention
-- Git and GitHub workflow
+```text
+Training data
+      ↓
+Model training
+      ↓
+Validation data
+      ↓
+Model development + calibration
+      ↓
+Untouched test data
+      ↓
+Final evaluation
+```
+
+The test set is not used to choose the final model or calibration factor.
+
+This provides a more honest estimate of how the final system performs on unseen data.
 
 ---
 
-## Lessons Learned
+## Limitations
 
-This section will be updated throughout development.
+This project has several limitations:
 
-### Data Leakage
+* The dataset represents a specific housing market and may not generalize to other regions.
+* The prediction intervals are empirically calibrated rather than guaranteed to provide exact 90% coverage.
+* The final test coverage was **86.76%**, below the nominal 90% level.
+* The model predicts based on historical dataset features and cannot account for information unavailable in the dataset.
+* The current project is a research/learning implementation rather than a production real-estate valuation system.
 
-Preprocessing operations that learn from the target or feature distribution must be fitted only on the appropriate training data.
+---
 
-### Target Transformation
+## Future Improvements
 
-The strong skew in raw house prices can be substantially reduced using a logarithmic transformation.
+Potential improvements include:
 
-### Pipeline Discipline
+* Hyperparameter optimization with cross-validation
+* More advanced gradient-boosting models
+* Feature engineering based on housing domain knowledge
+* Better uncertainty calibration
+* Cross-validation-based model comparison
+* Error analysis by house-price range
+* Explainability using SHAP
+* A prediction API using FastAPI
+* A web interface for interactive predictions
+* Model monitoring and retraining pipelines
 
-Keeping preprocessing and modeling inside a single pipeline makes it easier to ensure that transformations are consistently applied and prevents accidental leakage during cross-validation.
+---
 
+## Dataset
 
+This project uses the **Ames Housing dataset**, commonly used for regression and machine learning experimentation.
 
+The project focuses on building the modeling pipeline rather than redistributing the original dataset.
+
+---
+
+## License
+
+See the repository's license file for licensing information.
