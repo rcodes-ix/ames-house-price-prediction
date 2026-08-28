@@ -1,257 +1,192 @@
-# Ames House Price Prediction
+# Ames House Price AI
 
-A machine learning regression pipeline for predicting residential house prices using the Ames Housing dataset.
+A full-stack machine learning application that predicts house prices using the **Ames Housing dataset**.
 
-The project goes beyond a single regression model by combining **leak-resistant preprocessing, multiple regression algorithms, out-of-fold stacking, and quantile regression for prediction intervals**.
-
-The final stacking ensemble achieved an **R² of 0.9198** on the held-out test set.
+The application combines multiple regression models, allows users to choose which trained model generates the prediction, displays model performance using **R²**, and provides a **90% prediction interval** alongside the estimated house price.
 
 ---
 
 ## Overview
 
-Predicting house prices is a regression problem where the target variable can be highly skewed and the dataset contains both numerical and categorical features with missing values.
+**Ames House Price AI** turns a trained machine-learning regression pipeline into an interactive web application.
 
-This project builds a complete end-to-end regression workflow that:
+Users provide five important characteristics of a house:
 
-* Handles missing numerical and categorical values
-* Encodes categorical variables using target encoding
-* Standardizes numerical features
-* Applies a log transformation to the target
-* Trains and compares multiple regression models
-* Generates out-of-fold predictions
-* Combines models using a stacking ensemble
-* Estimates 90% prediction intervals using quantile regression
-* Calibrates the prediction intervals using validation data
-* Evaluates the final system on an untouched test set
+* Overall quality
+* Above-ground living area
+* Basement area
+* Garage capacity
+* Year built
 
-The goal is not only to predict a house's price, but also to estimate **how uncertain that prediction is**.
+They can then select between four trained prediction approaches:
 
----
+* **ElasticNet**
+* **Random Forest**
+* **Gradient Boosting**
+* **Stacking Ensemble**
 
-## Project Goals
+The selected model is actually used by the backend to generate the prediction.
 
-The project focuses on three main objectives:
-
-1. Build a reliable house-price regression pipeline.
-2. Improve predictive performance through ensemble learning.
-3. Provide prediction intervals instead of only point estimates.
-
-This makes the system more informative than a model that simply outputs:
-
-> Predicted price: $250,000
-
-Instead, the final system can provide a prediction together with an estimated range of plausible prices.
+The application also displays the **test R² performance** of each model so users can understand how the models compare.
 
 ---
 
-## Machine Learning Approach
+## Features
 
-### 1. Data Preparation
+### House Price Prediction
 
-The Ames Housing dataset contains approximately 2,900 residential properties and a mixture of numerical and categorical features.
+Predict an estimated sale price using five property characteristics:
 
-The `Id` column is removed because it is an identifier rather than a meaningful predictive feature.
-
-The target variable is transformed using:
-
-```python
-y_log = np.log1p(y)
-```
-
-This reduces the strong right skew in the original `SalePrice` distribution and allows the models to work with a more stable target distribution.
+| Feature       | Description                         |
+| ------------- | ----------------------------------- |
+| `OverallQual` | Overall material and finish quality |
+| `GrLivArea`   | Above-ground living area            |
+| `TotalBsmtSF` | Total basement area                 |
+| `GarageCars`  | Garage capacity                     |
+| `YearBuilt`   | Original construction year          |
 
 ---
 
-### 2. Train / Validation / Test Split
+### Multiple Prediction Models
 
-The dataset is divided into:
+The application supports four prediction modes:
 
-* **70% training**
-* **15% validation**
-* **15% test**
+#### ElasticNet
 
-The validation set is used during model development and calibration.
+A regularized linear regression model that combines L1 and L2 regularization.
 
-The test set remains untouched until the final evaluation.
+#### Random Forest
 
----
+A nonlinear ensemble of randomized decision trees capable of modeling complex relationships between features.
 
-### 3. Preprocessing
+#### Gradient Boosting
 
-The preprocessing pipeline uses `ColumnTransformer` and separate transformations for numerical and categorical features.
+A sequential boosting algorithm that builds models iteratively to correct previous prediction errors.
 
-#### Numerical features
+#### Stacking Ensemble
+
+Combines predictions from the three base models:
 
 ```text
-Median imputation
-        ↓
-StandardScaler
-```
-
-#### Categorical features
-
-```text
-Missing-value imputation
-        ↓
-Target encoding
-```
-
-The preprocessing steps are contained inside scikit-learn pipelines so that transformations are learned from the appropriate training data rather than manually applied beforehand.
-
----
-
-## Models
-
-Three base regression models were trained:
-
-### ElasticNet
-
-Used as the regularized linear baseline.
-
-```text
-ElasticNet
-alpha = 0.0005
-l1_ratio = 0.5
-```
-
-### Random Forest
-
-An ensemble of decision trees used to capture nonlinear relationships.
-
-```text
-n_estimators = 500
-max_features = sqrt
-```
-
-### Gradient Boosting
-
-A sequential boosting model designed to capture complex nonlinear relationships.
-
-```text
-n_estimators = 500
-learning_rate = 0.03
-max_depth = 3
+                 ┌─────────────────┐
+                 │   House Data    │
+                 └────────┬────────┘
+                          │
+             ┌────────────┼────────────┐
+             ▼            ▼            ▼
+        ElasticNet   Random Forest  Gradient Boosting
+             │            │            │
+             └────────────┼────────────┘
+                          ▼
+                 ┌─────────────────┐
+                 │ Stacking Model  │
+                 └────────┬────────┘
+                          ▼
+                   Final Prediction
 ```
 
 ---
 
-## Stacking Ensemble
+## Model Performance
 
-Instead of selecting only one base model, the project combines their predictions.
+The application displays the **test R² score** for every trained model.
 
-First, **5-fold out-of-fold predictions** are generated for:
+R² measures how well a regression model explains variation in the target variable.
 
-* ElasticNet
-* Random Forest
-* Gradient Boosting
+A higher R² generally indicates stronger predictive performance on the evaluation data.
 
-These predictions become the input features for a second-level linear regression model.
+The application dynamically displays the model metrics returned by the backend, allowing users to compare the models before making a prediction.
 
-```text
-ElasticNet ───────┐
-                  │
-Random Forest ────┼──→ Linear Regression → Final Prediction
-                  │
-Gradient Boosting ┘
-```
+> The exact scores shown in the application are generated from the trained models and should be updated here if the models are retrained.
 
-This allows the final model to learn how to combine the strengths of the individual models.
+Example:
 
----
-
-## Final Test Performance
-
-The final stacking ensemble was evaluated on the untouched test set.
-
-| Metric                 |         Result |
-| ---------------------- | -------------: |
-| **R²**                 |     **0.9198** |
-| **Variance explained** |     **91.98%** |
-| **RMSE**               | **$24,473.46** |
-| **MAE**                | **$14,282.78** |
-
-### What does this mean?
-
-The model explains approximately **91.98% of the variance in the log-transformed house prices** on the held-out test set.
-
-The MAE of approximately **$14.3K** means that the model's average absolute prediction error was about $14,283 on the original price scale.
+| Model             | Test R² |
+| ----------------- | ------: |
+| ElasticNet        | Dynamic |
+| Random Forest     | Dynamic |
+| Gradient Boosting | Dynamic |
+| Stacking Ensemble | Dynamic |
 
 ---
 
 ## Prediction Intervals
 
-A point prediction alone does not communicate uncertainty.
+The application does not only return a single predicted price.
 
-To address this, the project trains two additional Gradient Boosting models using quantile regression:
-
-```text
-5th percentile  → Lower bound
-95th percentile → Upper bound
-```
-
-Together these form a **nominal 90% prediction interval**.
-
-### Calibration
-
-The original interval achieved:
+It also provides a **90% prediction interval**:
 
 ```text
-Validation coverage: 82.65%
+Lower Bound  ───────── Predicted Price ───────── Upper Bound
 ```
 
-A calibration step expanded the interval based on validation residuals:
+This gives the user a range around the estimated price rather than presenting the prediction as an exact value.
+
+The backend calculates the lower and upper bounds using trained quantile models and a calibration factor.
+
+---
+
+## Machine Learning Pipeline
+
+The project uses a preprocessing and ensemble-based regression architecture.
+
+### Base Models
 
 ```text
-Original coverage:
-82.65%
-
-Calibrated validation coverage:
-89.95%
+House Features
+      │
+      ├──► ElasticNet
+      │
+      ├──► Random Forest
+      │
+      └──► Gradient Boosting
 ```
 
-The calibrated interval was then evaluated on the untouched test set.
+Their predictions are then used by the stacking model:
 
-### Final test interval results
+```text
+ElasticNet prediction
+        │
+Random Forest prediction ──► Stacking Model ──► Final Price
+        │
+Gradient Boosting prediction
+```
 
-| Metric                  |         Result |
-| ----------------------- | -------------: |
-| Nominal coverage        |        **90%** |
-| Empirical test coverage |     **86.76%** |
-| Mean interval width     | **$77,454.50** |
-| Median interval width   | **$63,671.09** |
-
-The **86.76% test coverage** is the empirical coverage observed on the held-out test set. It should not be interpreted as a guarantee that 90% of future predictions will fall inside the interval.
+The final prediction is converted from the model's logarithmic target representation back into the original dollar scale.
 
 ---
 
 ## Tech Stack
 
+### Machine Learning
+
 * Python
-* NumPy
 * pandas
+* NumPy
 * scikit-learn
-* category_encoders
-* Matplotlib
+* Joblib
+* LightGBM / quantile regression components
+* Ames Housing dataset
+
+### Backend
+
+* FastAPI
+* Pydantic
+* Uvicorn
+* Python
+
+### Frontend
+
+* Next.js
+* React
+* TypeScript
+* CSS
+
+### Development
+
+* Git
+* GitHub
 * Jupyter Notebook
-
-### Key techniques
-
-* Log transformation
-* Missing-value imputation
-* Standardization
-* Target encoding
-* ElasticNet regression
-* Random Forest regression
-* Gradient Boosting regression
-* K-fold cross-validation
-* Out-of-fold predictions
-* Stacking ensemble
-* Quantile regression
-* Prediction interval calibration
-* RMSE
-* MAE
-* R²
 
 ---
 
@@ -260,141 +195,330 @@ The **86.76% test coverage** is the empirical coverage observed on the held-out 
 ```text
 ames-house-price-prediction/
 │
-├── data/
-│   └── train.csv
+├── backend/
+│   ├── app.py
+│   ├── model.pkl
+│   ├── data/
+│   │   └── train.csv
+│   └── requirements.txt
 │
-├── house_price_prediction.ipynb
+├── frontend/
+│   ├── app/
+│   │   ├── page.tsx
+│   │   ├── globals.css
+│   │   └── layout.tsx
+│   │
+│   ├── public/
+│   ├── package.json
+│   └── ...
+│
+├── notebooks/
+│   └── ...
 │
 ├── README.md
-│
-└── ...
+└── .gitignore
 ```
 
-> The dataset is not included in this repository if it is subject to the original dataset's distribution terms. Download it separately and place the required file inside the `data/` directory.
+> Adjust the structure above if your actual repository folders have different names.
 
 ---
 
-## Getting Started
+# Getting Started
 
-### 1. Clone the repository
+## 1. Clone the repository
 
 ```bash
 git clone https://github.com/rcodes-ix/ames-house-price-prediction.git
 cd ames-house-price-prediction
 ```
 
-### 2. Create a virtual environment
+---
+
+# Backend Setup
+
+Move into the backend directory:
 
 ```bash
-python -m venv myenv
+cd backend
 ```
 
-Activate it on Linux/macOS:
+Create a virtual environment:
 
 ```bash
-source myenv/bin/activate
+python -m venv .venv
 ```
 
-On Windows:
+Activate it on Windows:
 
 ```bash
-myenv\Scripts\activate
+.venv\Scripts\activate
 ```
 
-### 3. Install dependencies
+Install the dependencies:
 
 ```bash
-pip install numpy pandas matplotlib scikit-learn category_encoders jupyter
+pip install -r requirements.txt
 ```
 
-### 4. Add the dataset
-
-Place the training dataset at:
+Make sure the trained model exists:
 
 ```text
-data/train.csv
+backend/model.pkl
 ```
 
-### 5. Run the notebook
-
-```bash
-jupyter notebook
-```
-
-Open:
+and the training data is available at:
 
 ```text
-house_price_prediction.ipynb
+backend/data/train.csv
 ```
 
-and run the cells from top to bottom.
+Start the FastAPI server:
+
+```bash
+uvicorn app:app --reload
+```
+
+The API will run at:
+
+```text
+http://localhost:8000
+```
 
 ---
 
-## Evaluation Philosophy
+# Frontend Setup
 
-A major focus of this project is avoiding misleading evaluation.
+Open another terminal and move into the frontend:
 
-The workflow separates:
+```bash
+cd frontend
+```
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start the development server:
+
+```bash
+npm run dev
+```
+
+The frontend will normally be available at:
 
 ```text
-Training data
-      ↓
+http://localhost:3000
+```
+
+---
+
+# 🔌 API
+
+## `GET /`
+
+Returns the API status.
+
+---
+
+## `GET /health`
+
+Checks whether the backend and trained model are available.
+
+Example response:
+
+```json
+{
+  "status": "healthy",
+  "model_loaded": true
+}
+```
+
+---
+
+## `GET /models`
+
+Returns the available trained models and their evaluation metrics.
+
+The frontend uses this endpoint to display model performance.
+
+---
+
+## `GET /features`
+
+Returns information about the features accepted by the application, including their valid ranges.
+
+---
+
+## `POST /predict`
+
+Generates a house-price prediction using the model selected by the user.
+
+Example request:
+
+```json
+{
+  "model": "random_forest",
+  "features": {
+    "OverallQual": 7,
+    "GrLivArea": 2000,
+    "TotalBsmtSF": 1000,
+    "GarageCars": 2,
+    "YearBuilt": 2005
+  }
+}
+```
+
+Example response:
+
+```json
+{
+  "model": "random_forest",
+  "model_name": "Random Forest",
+  "model_r2": 0.0,
+  "model_r2_percent": 0.0,
+  "predicted_price": 250000,
+  "lower_bound": 220000,
+  "upper_bound": 285000,
+  "interval_width": 65000
+}
+```
+
+> The numeric values above are examples. The actual application returns values generated by the trained models.
+
+---
+
+# Why These Five Features?
+
+The frontend intentionally keeps the user input simple.
+
+Instead of requiring users to enter dozens of Ames Housing features, the application asks for five high-value property characteristics:
+
+* Overall quality
+* Living area
+* Basement area
+* Garage capacity
+* Construction year
+
+The backend constructs the model input and handles the remaining training features through the preprocessing pipeline.
+
+This creates a much simpler interface while preserving the trained model architecture.
+
+---
+
+# Model Selection
+
+One of the main features of the application is **real model selection**.
+
+When the user selects a model, the frontend sends the selected model identifier to the backend.
+
+For example:
+
+```json
+{
+  "model": "elastic",
+  "features": {
+    "OverallQual": 7,
+    "GrLivArea": 2000,
+    "TotalBsmtSF": 1000,
+    "GarageCars": 2,
+    "YearBuilt": 2005
+  }
+}
+```
+
+The backend then runs the corresponding trained model rather than simply changing the label shown in the interface.
+
+This allows users to compare predictions produced by different regression approaches.
+
+---
+
+# Evaluation Metric
+
+The primary model-comparison metric displayed by the application is:
+
+### R² — Coefficient of Determination
+
+R² indicates how much of the variation in the target variable is explained by the regression model.
+
+In general:
+
+* **Closer to 1.0** → stronger fit
+* **Closer to 0** → weaker explanatory performance
+* **Negative values** → model performs worse than a simple baseline
+
+The application displays R² as a percentage for easier interpretation.
+
+For example:
+
+```text
+R² = 0.92
+
+Displayed as:
+
+92%
+```
+
+---
+
+# Limitations
+
+This application is a machine-learning demonstration and should not be treated as a professional property valuation system.
+
+The prediction can be affected by:
+
+* Limited user-provided features
+* Dataset characteristics
+* Historical housing-market patterns
+* Differences between the training data and real-world properties
+* Model assumptions and preprocessing
+* Missing property characteristics
+
+The prediction interval should also be interpreted as an estimate of uncertainty, not a guarantee of the property's actual selling price.
+
+---
+
+# Dataset
+
+This project uses the **Ames Housing dataset**, a widely used dataset for regression and house-price prediction experiments.
+
+The dataset contains detailed information about residential properties and their sale prices.
+
+---
+
+# Project Goal
+
+The goal of this project was not simply to train a regression model.
+
+It was to build an end-to-end machine-learning application that connects:
+
+```text
+Dataset
+   ↓
+Data preprocessing
+   ↓
 Model training
-      ↓
-Validation data
-      ↓
-Model development + calibration
-      ↓
-Untouched test data
-      ↓
-Final evaluation
+   ↓
+Model evaluation
+   ↓
+Ensemble learning
+   ↓
+Prediction intervals
+   ↓
+FastAPI backend
+   ↓
+Next.js frontend
+   ↓
+Interactive prediction
 ```
 
-The test set is not used to choose the final model or calibration factor.
-
-This provides a more honest estimate of how the final system performs on unseen data.
-
----
-
-## Limitations
-
-This project has several limitations:
-
-* The dataset represents a specific housing market and may not generalize to other regions.
-* The prediction intervals are empirically calibrated rather than guaranteed to provide exact 90% coverage.
-* The final test coverage was **86.76%**, below the nominal 90% level.
-* The model predicts based on historical dataset features and cannot account for information unavailable in the dataset.
-* The current project is a research/learning implementation rather than a production real-estate valuation system.
-
----
-
-## Future Improvements
-
-Potential improvements include:
-
-* Hyperparameter optimization with cross-validation
-* More advanced gradient-boosting models
-* Feature engineering based on housing domain knowledge
-* Better uncertainty calibration
-* Cross-validation-based model comparison
-* Error analysis by house-price range
-* Explainability using SHAP
-* A prediction API using FastAPI
-* A web interface for interactive predictions
-* Model monitoring and retraining pipelines
-
----
-
-## Dataset
-
-This project uses the **Ames Housing dataset**, commonly used for regression and machine learning experimentation.
-
-The project focuses on building the modeling pipeline rather than redistributing the original dataset.
+This project demonstrates how a machine-learning model can be turned into an actual usable application rather than remaining inside a notebook.
 
 ---
 
 ## License
 
-This project is licensed under the MIT License.
-See the LICENSE file for the full license text.
+This project is available for educational and portfolio purposes.
+
+
