@@ -519,6 +519,6 @@ This project demonstrates how a machine-learning model can be turned into an act
 
 ## License
 
-This project is available for educational and portfolio purposes.
+This project is licensed under the MIT License.
 
 
