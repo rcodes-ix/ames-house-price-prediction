@@ -1,3 +1,4 @@
+
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,9 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score
 
 
 # ============================================================
@@ -26,7 +30,6 @@ DATA_PATH = BASE_DIR / "data" / "train.csv"
 
 try:
     bundle = joblib.load(MODEL_PATH)
-
 except Exception as e:
     raise RuntimeError(
         f"Could not load model bundle from {MODEL_PATH}: {e}"
@@ -54,9 +57,7 @@ calibration_factor = bundle["calibration_factor"]
 # ============================================================
 
 feature_columns = bundle["feature_columns"]
-
 numeric_features = bundle["numeric_features"]
-
 categorical_features = bundle["categorical_features"]
 
 
@@ -73,10 +74,6 @@ USER_FEATURES = [
 ]
 
 
-# ============================================================
-# CHECK USER FEATURES
-# ============================================================
-
 missing_user_features = [
     feature
     for feature in USER_FEATURES
@@ -91,51 +88,17 @@ if missing_user_features:
 
 
 # ============================================================
-# AVAILABLE MODELS
-# ============================================================
-
-AVAILABLE_MODELS = {
-    "elastic": {
-        "model": elastic_model,
-        "name": "ElasticNet",
-        "description": "Regularized linear regression model.",
-    },
-    "random_forest": {
-        "model": rf_model,
-        "name": "Random Forest",
-        "description": "Ensemble of decision trees.",
-    },
-    "gradient_boosting": {
-        "model": gbr_model,
-        "name": "Gradient Boosting",
-        "description": "Sequential tree-based boosting model.",
-    },
-    "stacking": {
-        "model": stack_model,
-        "name": "Stacking Ensemble",
-        "description": "Combines predictions from all three base models.",
-    },
-}
-
-
-# ============================================================
 # FEATURE RANGES
 # ============================================================
 
 def load_feature_ranges():
-    """
-    Load the actual min/max values from the training dataset.
-    """
-
     if not DATA_PATH.exists():
         raise RuntimeError(
-            f"Training dataset not found at {DATA_PATH}. "
-            "Place train.csv inside backend/data/."
+            f"Training dataset not found at {DATA_PATH}."
         )
 
     try:
         data = pd.read_csv(DATA_PATH)
-
     except Exception as e:
         raise RuntimeError(
             f"Could not read training dataset: {e}"
@@ -166,6 +129,11 @@ def load_feature_ranges():
             "max": float(series.max())
         }
 
+    # IMPORTANT:
+    # The dataset's historical maximum is 2010,
+    # but the UI should allow the current year.
+    ranges["YearBuilt"]["max"] = 2026
+
     return ranges
 
 
@@ -173,16 +141,146 @@ feature_ranges = load_feature_ranges()
 
 
 # ============================================================
-# FASTAPI
+# MODEL INFORMATION
+# ============================================================
+
+MODEL_INFO = {
+    "elastic": {
+        "name": "ElasticNet",
+        "short_name": "ElasticNet",
+        "description": (
+            "A regularized linear regression model. "
+            "Strong as a simple, interpretable baseline."
+        ),
+    },
+    "random_forest": {
+        "name": "Random Forest",
+        "short_name": "Random Forest",
+        "description": (
+            "An ensemble of decision trees that captures "
+            "nonlinear relationships and feature interactions."
+        ),
+    },
+    "gradient_boosting": {
+        "name": "Gradient Boosting",
+        "short_name": "Gradient Boosting",
+        "description": (
+            "A sequential tree-based model that focuses on "
+            "reducing errors made by previous trees."
+        ),
+    },
+    "stacking": {
+        "name": "Stacking Ensemble",
+        "short_name": "Stacking",
+        "description": (
+            "Combines ElasticNet, Random Forest, and "
+            "Gradient Boosting through a trained meta-model."
+        ),
+    },
+}
+
+
+# ============================================================
+# CALCULATE REAL TEST R² SCORES
+# ============================================================
+
+def calculate_model_metrics():
+    """
+    Recreate the same 70/15/15 split used during training
+    and evaluate the already-trained models on the held-out
+    test set.
+
+    This gives the frontend real R² values instead of
+    invented percentages.
+    """
+
+    if not DATA_PATH.exists():
+        raise RuntimeError(
+            f"Training dataset not found at {DATA_PATH}."
+        )
+
+    df = pd.read_csv(DATA_PATH)
+
+    if "SalePrice" not in df.columns:
+        raise RuntimeError(
+            "SalePrice column was not found in train.csv."
+        )
+
+    # Same feature preparation used by the project.
+    X = df.drop(
+        columns=["SalePrice", "Id"],
+        errors="ignore"
+    )
+
+    y_log = np.log1p(df["SalePrice"])
+
+    # Keep exactly the features expected by the trained models.
+    X = X[feature_columns]
+
+    # Same split used in the project.
+    X_train, X_temp, y_train, y_temp = train_test_split(
+        X,
+        y_log,
+        test_size=0.30,
+        random_state=42
+    )
+
+    X_valid, X_test, y_valid, y_test = train_test_split(
+        X_temp,
+        y_temp,
+        test_size=0.50,
+        random_state=42
+    )
+
+    # Base models
+    elastic_pred = elastic_model.predict(X_test)
+    rf_pred = rf_model.predict(X_test)
+    gbr_pred = gbr_model.predict(X_test)
+
+    # Stacking model
+    stack_input = pd.DataFrame({
+        "ElasticNet": elastic_pred,
+        "RandomForest": rf_pred,
+        "GradientBoosting": gbr_pred,
+    })
+
+    stack_pred = stack_model.predict(stack_input)
+
+    return {
+        "elastic": float(
+            r2_score(y_test, elastic_pred)
+        ),
+        "random_forest": float(
+            r2_score(y_test, rf_pred)
+        ),
+        "gradient_boosting": float(
+            r2_score(y_test, gbr_pred)
+        ),
+        "stacking": float(
+            r2_score(y_test, stack_pred)
+        ),
+    }
+
+
+try:
+    MODEL_METRICS = calculate_model_metrics()
+except Exception as e:
+    raise RuntimeError(
+        f"Could not calculate model metrics: {e}"
+    )
+
+
+# ============================================================
+# FASTAPI APPLICATION
 # ============================================================
 
 app = FastAPI(
     title="Ames House Price Prediction API",
     description=(
         "House price prediction using multiple trained "
-        "regression models."
+        "regression models and a stacking ensemble."
     ),
-    version="1.0.0"
+    version="2.0.0"
 )
 
 
@@ -205,16 +303,6 @@ app.add_middleware(
 
 class PredictionRequest(BaseModel):
     features: dict[str, Any]
-
-    # Model selected by the frontend.
-    #
-    # Possible values:
-    #
-    # elastic
-    # random_forest
-    # gradient_boosting
-    # stacking
-
     model: str = "stacking"
 
 
@@ -224,7 +312,6 @@ class PredictionRequest(BaseModel):
 
 @app.get("/")
 def root():
-
     return {
         "message": "Ames House Price Prediction API",
         "status": "running"
@@ -237,35 +324,14 @@ def root():
 
 @app.get("/health")
 def health():
-
     return {
         "status": "healthy",
-        "model_loaded": True,
-        "available_models": list(AVAILABLE_MODELS.keys())
+        "model_loaded": True
     }
 
 
 # ============================================================
-# MODELS ENDPOINT
-# ============================================================
-
-@app.get("/models")
-def get_models():
-
-    return {
-        "models": [
-            {
-                "id": model_id,
-                "name": model_info["name"],
-                "description": model_info["description"],
-            }
-            for model_id, model_info in AVAILABLE_MODELS.items()
-        ]
-    }
-
-
-# ============================================================
-# FEATURES ENDPOINT
+# FEATURES
 # ============================================================
 
 @app.get("/features")
@@ -285,7 +351,6 @@ def get_features():
                     "of the house."
                 )
             },
-
             {
                 "name": "GrLivArea",
                 "label": "Above-Ground Living Area",
@@ -295,10 +360,9 @@ def get_features():
                 "step": 1,
                 "unit": "sq ft",
                 "description": (
-                    "Above-ground living area of the house."
+                    "Above-ground living area."
                 )
             },
-
             {
                 "name": "TotalBsmtSF",
                 "label": "Total Basement Area",
@@ -308,10 +372,9 @@ def get_features():
                 "step": 1,
                 "unit": "sq ft",
                 "description": (
-                    "Total basement area of the house."
+                    "Total basement area."
                 )
             },
-
             {
                 "name": "GarageCars",
                 "label": "Garage Capacity",
@@ -324,13 +387,12 @@ def get_features():
                     "Number of cars the garage can accommodate."
                 )
             },
-
             {
                 "name": "YearBuilt",
                 "label": "Year Built",
                 "type": "numeric",
-                "min": feature_ranges["YearBuilt"]["min"],
-                "max": feature_ranges["YearBuilt"]["max"],
+                "min": 1872,
+                "max": 2026,
                 "step": 1,
                 "description": (
                     "Original construction year."
@@ -341,7 +403,33 @@ def get_features():
 
 
 # ============================================================
-# VALIDATE USER FEATURES
+# MODELS ENDPOINT
+# ============================================================
+
+@app.get("/models")
+def get_models():
+
+    return {
+        "models": [
+            {
+                "id": model_id,
+                **MODEL_INFO[model_id],
+                "r2": round(
+                    MODEL_METRICS[model_id],
+                    4
+                ),
+                "r2_percent": round(
+                    MODEL_METRICS[model_id] * 100,
+                    2
+                )
+            }
+            for model_id in MODEL_INFO
+        ]
+    }
+
+
+# ============================================================
+# VALIDATION
 # ============================================================
 
 def validate_user_features(user_features):
@@ -353,7 +441,6 @@ def validate_user_features(user_features):
     ]
 
     if missing_features:
-
         raise HTTPException(
             status_code=400,
             detail={
@@ -364,22 +451,11 @@ def validate_user_features(user_features):
 
     cleaned_features = {}
 
-    integer_features = [
-        "OverallQual",
-        "GarageCars",
-        "YearBuilt"
-    ]
-
     for feature in USER_FEATURES:
 
         value = user_features.get(feature)
 
-        # ----------------------------------------------------
-        # EMPTY
-        # ----------------------------------------------------
-
         if value is None or value == "":
-
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -387,16 +463,9 @@ def validate_user_features(user_features):
                 }
             )
 
-        # ----------------------------------------------------
-        # CONVERT TO NUMBER
-        # ----------------------------------------------------
-
         try:
-
             numeric_value = float(value)
-
         except (ValueError, TypeError):
-
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -406,12 +475,7 @@ def validate_user_features(user_features):
                 }
             )
 
-        # ----------------------------------------------------
-        # FINITE NUMBER
-        # ----------------------------------------------------
-
         if not np.isfinite(numeric_value):
-
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -420,10 +484,6 @@ def validate_user_features(user_features):
                     )
                 }
             )
-
-        # ----------------------------------------------------
-        # RANGE
-        # ----------------------------------------------------
 
         minimum = feature_ranges[feature]["min"]
 
@@ -445,14 +505,13 @@ def validate_user_features(user_features):
                 }
             )
 
-        # ----------------------------------------------------
-        # INTEGER FEATURES
-        # ----------------------------------------------------
-
-        if feature in integer_features:
+        if feature in [
+            "OverallQual",
+            "GarageCars",
+            "YearBuilt"
+        ]:
 
             if not numeric_value.is_integer():
-
                 raise HTTPException(
                     status_code=400,
                     detail={
@@ -465,7 +524,6 @@ def validate_user_features(user_features):
             numeric_value = int(numeric_value)
 
         else:
-
             numeric_value = float(numeric_value)
 
         cleaned_features[feature] = numeric_value
@@ -474,31 +532,7 @@ def validate_user_features(user_features):
 
 
 # ============================================================
-# BUILD MODEL INPUT
-# ============================================================
-
-def build_input_dataframe(cleaned_features):
-
-    row = {}
-
-    for feature in feature_columns:
-
-        if feature in cleaned_features:
-
-            row[feature] = cleaned_features[feature]
-
-        else:
-
-            row[feature] = np.nan
-
-    return pd.DataFrame(
-        [row],
-        columns=feature_columns
-    )
-
-
-# ============================================================
-# PREDICT
+# PREDICTION
 # ============================================================
 
 @app.post("/predict")
@@ -506,104 +540,116 @@ def predict(request: PredictionRequest):
 
     try:
 
-        # ====================================================
-        # 1. VALIDATE MODEL
-        # ====================================================
+        # ----------------------------------------------------
+        # Validate selected model
+        # ----------------------------------------------------
 
-        selected_model = request.model.lower().strip()
+        selected_model = request.model
 
-        if selected_model not in AVAILABLE_MODELS:
-
+        if selected_model not in MODEL_INFO:
             raise HTTPException(
                 status_code=400,
                 detail={
-                    "message": "Unknown model selected.",
-                    "selected_model": selected_model,
-                    "available_models": list(
-                        AVAILABLE_MODELS.keys()
+                    "message": "Invalid model selected.",
+                    "allowed_models": list(
+                        MODEL_INFO.keys()
                     )
                 }
             )
 
-        # ====================================================
-        # 2. VALIDATE FEATURES
-        # ====================================================
+        # ----------------------------------------------------
+        # Validate features
+        # ----------------------------------------------------
 
         cleaned_features = validate_user_features(
             request.features
         )
 
-        # ====================================================
-        # 3. BUILD DATAFRAME
-        # ====================================================
+        # ----------------------------------------------------
+        # Build complete dataframe
+        # ----------------------------------------------------
 
-        input_df = build_input_dataframe(
-            cleaned_features
+        row = {}
+
+        for feature in feature_columns:
+
+            if feature in cleaned_features:
+                row[feature] = cleaned_features[feature]
+            else:
+                row[feature] = np.nan
+
+        input_df = pd.DataFrame(
+            [row],
+            columns=feature_columns
         )
 
-        # ====================================================
-        # 4. RUN SELECTED MODEL
-        # ====================================================
+        # ----------------------------------------------------
+        # Run all three base models
+        #
+        # This is important because the stacking model needs
+        # all three predictions.
+        # ----------------------------------------------------
 
-        if selected_model == "stacking":
+        elastic_pred = elastic_model.predict(
+            input_df
+        )[0]
 
-            # ------------------------------------------------
-            # Run all three base models
-            # ------------------------------------------------
+        rf_pred = rf_model.predict(
+            input_df
+        )[0]
 
-            elastic_pred = elastic_model.predict(
-                input_df
-            )[0]
+        gbr_pred = gbr_model.predict(
+            input_df
+        )[0]
 
-            rf_pred = rf_model.predict(
-                input_df
-            )[0]
+        # ----------------------------------------------------
+        # Calculate stacking prediction
+        # ----------------------------------------------------
 
-            gbr_pred = gbr_model.predict(
-                input_df
-            )[0]
+        stack_input = pd.DataFrame({
+            "ElasticNet": [elastic_pred],
+            "RandomForest": [rf_pred],
+            "GradientBoosting": [gbr_pred]
+        })
 
-            # ------------------------------------------------
-            # Feed their predictions into stack model
-            # ------------------------------------------------
+        stack_pred = stack_model.predict(
+            stack_input
+        )[0]
 
-            stack_input = pd.DataFrame({
-                "ElasticNet": [elastic_pred],
-                "RandomForest": [rf_pred],
-                "GradientBoosting": [gbr_pred]
-            })
+        # ----------------------------------------------------
+        # Select the REAL prediction from selected model
+        # ----------------------------------------------------
 
-            log_prediction = stack_model.predict(
-                stack_input
-            )[0]
+        if selected_model == "elastic":
+
+            selected_log_prediction = elastic_pred
+
+        elif selected_model == "random_forest":
+
+            selected_log_prediction = rf_pred
+
+        elif selected_model == "gradient_boosting":
+
+            selected_log_prediction = gbr_pred
 
         else:
 
-            # ------------------------------------------------
-            # IMPORTANT:
-            #
-            # Actually run the model selected by the user.
-            # ------------------------------------------------
+            selected_log_prediction = stack_pred
 
-            selected_estimator = AVAILABLE_MODELS[
-                selected_model
-            ]["model"]
-
-            log_prediction = selected_estimator.predict(
-                input_df
-            )[0]
-
-        # ====================================================
-        # 5. LOG → DOLLARS
-        # ====================================================
+        # ----------------------------------------------------
+        # Convert log prediction to dollars
+        # ----------------------------------------------------
 
         predicted_price = np.expm1(
-            log_prediction
+            selected_log_prediction
         )
 
-        # ====================================================
-        # 6. PREDICTION INTERVAL
-        # ====================================================
+        # ----------------------------------------------------
+        # Prediction interval
+        #
+        # The calibrated quantile models belong to the
+        # project's uncertainty pipeline.
+        # ----------------------------------------------------
 
         lower_log = lower_model.predict(
             input_df
@@ -613,8 +659,6 @@ def predict(request: PredictionRequest):
             input_df
         )[0]
 
-        # Apply calibration
-
         calibrated_lower_log = (
             lower_log - calibration_factor
         )
@@ -622,8 +666,6 @@ def predict(request: PredictionRequest):
         calibrated_upper_log = (
             upper_log + calibration_factor
         )
-
-        # Convert to dollars
 
         lower_price = np.expm1(
             calibrated_lower_log
@@ -633,9 +675,9 @@ def predict(request: PredictionRequest):
             calibrated_upper_log
         )
 
-        # ====================================================
-        # 7. SAFETY
-        # ====================================================
+        # ----------------------------------------------------
+        # Safety checks
+        # ----------------------------------------------------
 
         predicted_price = max(
             0.0,
@@ -648,35 +690,33 @@ def predict(request: PredictionRequest):
         )
 
         upper_price = max(
-            0.0,
+            predicted_price,
             float(upper_price)
         )
-
-        if upper_price < predicted_price:
-
-            upper_price = predicted_price
-
-        if lower_price > predicted_price:
-
-            lower_price = predicted_price
 
         interval_width = (
             upper_price - lower_price
         )
 
-        # ====================================================
-        # 8. MODEL NAME
-        # ====================================================
-
-        model_name = AVAILABLE_MODELS[
-            selected_model
-        ]["name"]
-
-        # ====================================================
-        # 9. RESPONSE
-        # ====================================================
+        # ----------------------------------------------------
+        # Response
+        # ----------------------------------------------------
 
         return {
+            "model": selected_model,
+            "model_name": MODEL_INFO[
+                selected_model
+            ]["name"],
+
+            "model_r2": round(
+                MODEL_METRICS[selected_model],
+                4
+            ),
+
+            "model_r2_percent": round(
+                MODEL_METRICS[selected_model] * 100,
+                2
+            ),
 
             "predicted_price": round(
                 predicted_price,
@@ -698,26 +738,14 @@ def predict(request: PredictionRequest):
                 2
             ),
 
-            "model": selected_model,
-
-            "model_name": model_name,
-
             "inputs": {
                 feature: cleaned_features[feature]
                 for feature in USER_FEATURES
             }
         }
 
-    # ========================================================
-    # EXPECTED HTTP ERRORS
-    # ========================================================
-
     except HTTPException:
         raise
-
-    # ========================================================
-    # UNEXPECTED ERRORS
-    # ========================================================
 
     except Exception as e:
 
@@ -728,3 +756,4 @@ def predict(request: PredictionRequest):
                 "error": str(e)
             }
         )
+
