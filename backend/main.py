@@ -1,4 +1,3 @@
-
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +17,6 @@ from pydantic import BaseModel
 BASE_DIR = Path(__file__).resolve().parent
 
 MODEL_PATH = BASE_DIR / "model.pkl"
-
-# If your train.csv is inside backend/data/train.csv
 DATA_PATH = BASE_DIR / "data" / "train.csv"
 
 
@@ -37,7 +34,7 @@ except Exception as e:
 
 
 # ============================================================
-# LOAD MODELS
+# LOAD TRAINED MODELS
 # ============================================================
 
 elastic_model = bundle["elastic_model"]
@@ -66,12 +63,6 @@ categorical_features = bundle["categorical_features"]
 # ============================================================
 # USER-FACING FEATURES
 # ============================================================
-#
-# The website only asks the user for these five features.
-#
-# The remaining original training features are automatically
-# filled with NaN and handled by the preprocessing pipelines.
-#
 
 USER_FEATURES = [
     "OverallQual",
@@ -82,8 +73,9 @@ USER_FEATURES = [
 ]
 
 
-# Make sure the selected features actually exist
-# in the trained model.
+# ============================================================
+# CHECK USER FEATURES
+# ============================================================
 
 missing_user_features = [
     feature
@@ -99,16 +91,40 @@ if missing_user_features:
 
 
 # ============================================================
+# AVAILABLE MODELS
+# ============================================================
+
+AVAILABLE_MODELS = {
+    "elastic": {
+        "model": elastic_model,
+        "name": "ElasticNet",
+        "description": "Regularized linear regression model.",
+    },
+    "random_forest": {
+        "model": rf_model,
+        "name": "Random Forest",
+        "description": "Ensemble of decision trees.",
+    },
+    "gradient_boosting": {
+        "model": gbr_model,
+        "name": "Gradient Boosting",
+        "description": "Sequential tree-based boosting model.",
+    },
+    "stacking": {
+        "model": stack_model,
+        "name": "Stacking Ensemble",
+        "description": "Combines predictions from all three base models.",
+    },
+}
+
+
+# ============================================================
 # FEATURE RANGES
 # ============================================================
 
 def load_feature_ranges():
     """
-    Load the actual minimum and maximum values of the five
-    user-facing features from the Ames training dataset.
-
-    This prevents the frontend from using meaningless ranges
-    such as 0, 1, 2, 3 for fields like GrLivArea.
+    Load the actual min/max values from the training dataset.
     """
 
     if not DATA_PATH.exists():
@@ -145,12 +161,9 @@ def load_feature_ranges():
                 f"No valid numeric values found for {feature}."
             )
 
-        minimum = float(series.min())
-        maximum = float(series.max())
-
         ranges[feature] = {
-            "min": minimum,
-            "max": maximum
+            "min": float(series.min()),
+            "max": float(series.max())
         }
 
     return ranges
@@ -160,14 +173,14 @@ feature_ranges = load_feature_ranges()
 
 
 # ============================================================
-# FASTAPI APPLICATION
+# FASTAPI
 # ============================================================
 
 app = FastAPI(
     title="Ames House Price Prediction API",
     description=(
-        "House price prediction using a stacked ensemble "
-        "with calibrated prediction intervals."
+        "House price prediction using multiple trained "
+        "regression models."
     ),
     version="1.0.0"
 )
@@ -193,6 +206,17 @@ app.add_middleware(
 class PredictionRequest(BaseModel):
     features: dict[str, Any]
 
+    # Model selected by the frontend.
+    #
+    # Possible values:
+    #
+    # elastic
+    # random_forest
+    # gradient_boosting
+    # stacking
+
+    model: str = "stacking"
+
 
 # ============================================================
 # ROOT
@@ -200,6 +224,7 @@ class PredictionRequest(BaseModel):
 
 @app.get("/")
 def root():
+
     return {
         "message": "Ames House Price Prediction API",
         "status": "running"
@@ -207,14 +232,35 @@ def root():
 
 
 # ============================================================
-# HEALTH CHECK
+# HEALTH
 # ============================================================
 
 @app.get("/health")
 def health():
+
     return {
         "status": "healthy",
-        "model_loaded": True
+        "model_loaded": True,
+        "available_models": list(AVAILABLE_MODELS.keys())
+    }
+
+
+# ============================================================
+# MODELS ENDPOINT
+# ============================================================
+
+@app.get("/models")
+def get_models():
+
+    return {
+        "models": [
+            {
+                "id": model_id,
+                "name": model_info["name"],
+                "description": model_info["description"],
+            }
+            for model_id, model_info in AVAILABLE_MODELS.items()
+        ]
     }
 
 
@@ -224,10 +270,6 @@ def health():
 
 @app.get("/features")
 def get_features():
-    """
-    Returns only the five features that the website
-    should ask the user to enter.
-    """
 
     return {
         "features": [
@@ -243,6 +285,7 @@ def get_features():
                     "of the house."
                 )
             },
+
             {
                 "name": "GrLivArea",
                 "label": "Above-Ground Living Area",
@@ -255,6 +298,7 @@ def get_features():
                     "Above-ground living area of the house."
                 )
             },
+
             {
                 "name": "TotalBsmtSF",
                 "label": "Total Basement Area",
@@ -267,6 +311,7 @@ def get_features():
                     "Total basement area of the house."
                 )
             },
+
             {
                 "name": "GarageCars",
                 "label": "Garage Capacity",
@@ -279,6 +324,7 @@ def get_features():
                     "Number of cars the garage can accommodate."
                 )
             },
+
             {
                 "name": "YearBuilt",
                 "label": "Year Built",
@@ -287,7 +333,7 @@ def get_features():
                 "max": feature_ranges["YearBuilt"]["max"],
                 "step": 1,
                 "description": (
-                    "Original construction year of the house."
+                    "Original construction year."
                 )
             }
         ]
@@ -299,11 +345,6 @@ def get_features():
 # ============================================================
 
 def validate_user_features(user_features):
-    """
-    Validate the five values entered by the user.
-
-    Returns a cleaned dictionary containing numeric values.
-    """
 
     missing_features = [
         feature
@@ -312,6 +353,7 @@ def validate_user_features(user_features):
     ]
 
     if missing_features:
+
         raise HTTPException(
             status_code=400,
             detail={
@@ -322,15 +364,22 @@ def validate_user_features(user_features):
 
     cleaned_features = {}
 
+    integer_features = [
+        "OverallQual",
+        "GarageCars",
+        "YearBuilt"
+    ]
+
     for feature in USER_FEATURES:
 
         value = user_features.get(feature)
 
         # ----------------------------------------------------
-        # Empty value
+        # EMPTY
         # ----------------------------------------------------
 
         if value is None or value == "":
+
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -339,10 +388,11 @@ def validate_user_features(user_features):
             )
 
         # ----------------------------------------------------
-        # Convert to number
+        # CONVERT TO NUMBER
         # ----------------------------------------------------
 
         try:
+
             numeric_value = float(value)
 
         except (ValueError, TypeError):
@@ -357,7 +407,7 @@ def validate_user_features(user_features):
             )
 
         # ----------------------------------------------------
-        # Check finite number
+        # FINITE NUMBER
         # ----------------------------------------------------
 
         if not np.isfinite(numeric_value):
@@ -372,7 +422,7 @@ def validate_user_features(user_features):
             )
 
         # ----------------------------------------------------
-        # Range validation
+        # RANGE
         # ----------------------------------------------------
 
         minimum = feature_ranges[feature]["min"]
@@ -396,14 +446,10 @@ def validate_user_features(user_features):
             )
 
         # ----------------------------------------------------
-        # Integer features
+        # INTEGER FEATURES
         # ----------------------------------------------------
 
-        if feature in [
-            "OverallQual",
-            "GarageCars",
-            "YearBuilt"
-        ]:
+        if feature in integer_features:
 
             if not numeric_value.is_integer():
 
@@ -428,7 +474,31 @@ def validate_user_features(user_features):
 
 
 # ============================================================
-# PREDICTION ENDPOINT
+# BUILD MODEL INPUT
+# ============================================================
+
+def build_input_dataframe(cleaned_features):
+
+    row = {}
+
+    for feature in feature_columns:
+
+        if feature in cleaned_features:
+
+            row[feature] = cleaned_features[feature]
+
+        else:
+
+            row[feature] = np.nan
+
+    return pd.DataFrame(
+        [row],
+        columns=feature_columns
+    )
+
+
+# ============================================================
+# PREDICT
 # ============================================================
 
 @app.post("/predict")
@@ -437,114 +507,113 @@ def predict(request: PredictionRequest):
     try:
 
         # ====================================================
-        # STEP 1 — GET USER INPUT
+        # 1. VALIDATE MODEL
         # ====================================================
 
-        user_features = request.features
+        selected_model = request.model.lower().strip()
+
+        if selected_model not in AVAILABLE_MODELS:
+
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Unknown model selected.",
+                    "selected_model": selected_model,
+                    "available_models": list(
+                        AVAILABLE_MODELS.keys()
+                    )
+                }
+            )
 
         # ====================================================
-        # STEP 2 — VALIDATE THE FIVE INPUTS
+        # 2. VALIDATE FEATURES
         # ====================================================
 
         cleaned_features = validate_user_features(
-            user_features
+            request.features
         )
 
         # ====================================================
-        # STEP 3 — BUILD COMPLETE MODEL INPUT
-        # ====================================================
-        #
-        # The trained model originally expects all training
-        # features.
-        #
-        # We create all of them here.
-        #
-        # The five user-selected features receive real values.
-        #
-        # Everything else becomes NaN.
-        #
-        # The existing preprocessing pipeline handles these
-        # missing values using its imputers.
-        #
-
-        row = {}
-
-        for feature in feature_columns:
-
-            if feature in cleaned_features:
-
-                row[feature] = cleaned_features[feature]
-
-            else:
-
-                row[feature] = np.nan
-
-        # ====================================================
-        # STEP 4 — CREATE DATAFRAME
+        # 3. BUILD DATAFRAME
         # ====================================================
 
-        input_df = pd.DataFrame(
-            [row],
-            columns=feature_columns
+        input_df = build_input_dataframe(
+            cleaned_features
         )
 
         # ====================================================
-        # STEP 5 — BASE MODEL PREDICTIONS
+        # 4. RUN SELECTED MODEL
         # ====================================================
 
-        elastic_pred = elastic_model.predict(
-            input_df
-        )[0]
+        if selected_model == "stacking":
 
-        rf_pred = rf_model.predict(
-            input_df
-        )[0]
+            # ------------------------------------------------
+            # Run all three base models
+            # ------------------------------------------------
 
-        gbr_pred = gbr_model.predict(
-            input_df
-        )[0]
+            elastic_pred = elastic_model.predict(
+                input_df
+            )[0]
+
+            rf_pred = rf_model.predict(
+                input_df
+            )[0]
+
+            gbr_pred = gbr_model.predict(
+                input_df
+            )[0]
+
+            # ------------------------------------------------
+            # Feed their predictions into stack model
+            # ------------------------------------------------
+
+            stack_input = pd.DataFrame({
+                "ElasticNet": [elastic_pred],
+                "RandomForest": [rf_pred],
+                "GradientBoosting": [gbr_pred]
+            })
+
+            log_prediction = stack_model.predict(
+                stack_input
+            )[0]
+
+        else:
+
+            # ------------------------------------------------
+            # IMPORTANT:
+            #
+            # Actually run the model selected by the user.
+            # ------------------------------------------------
+
+            selected_estimator = AVAILABLE_MODELS[
+                selected_model
+            ]["model"]
+
+            log_prediction = selected_estimator.predict(
+                input_df
+            )[0]
 
         # ====================================================
-        # STEP 6 — STACKING
-        # ====================================================
-
-        stack_input = pd.DataFrame({
-            "ElasticNet": [elastic_pred],
-            "RandomForest": [rf_pred],
-            "GradientBoosting": [gbr_pred]
-        })
-
-        stack_log_prediction = stack_model.predict(
-            stack_input
-        )[0]
-
-        # ====================================================
-        # STEP 7 — CONVERT LOG PRICE TO DOLLARS
+        # 5. LOG → DOLLARS
         # ====================================================
 
         predicted_price = np.expm1(
-            stack_log_prediction
+            log_prediction
         )
 
         # ====================================================
-        # STEP 8 — LOWER QUANTILE
+        # 6. PREDICTION INTERVAL
         # ====================================================
 
         lower_log = lower_model.predict(
             input_df
         )[0]
 
-        # ====================================================
-        # STEP 9 — UPPER QUANTILE
-        # ====================================================
-
         upper_log = upper_model.predict(
             input_df
         )[0]
 
-        # ====================================================
-        # STEP 10 — CALIBRATION
-        # ====================================================
+        # Apply calibration
 
         calibrated_lower_log = (
             lower_log - calibration_factor
@@ -554,9 +623,7 @@ def predict(request: PredictionRequest):
             upper_log + calibration_factor
         )
 
-        # ====================================================
-        # STEP 11 — CONVERT INTERVAL TO DOLLARS
-        # ====================================================
+        # Convert to dollars
 
         lower_price = np.expm1(
             calibrated_lower_log
@@ -567,54 +634,73 @@ def predict(request: PredictionRequest):
         )
 
         # ====================================================
-        # STEP 12 — INTERVAL WIDTH
+        # 7. SAFETY
         # ====================================================
 
-        interval_width = (
-            upper_price - lower_price
+        predicted_price = max(
+            0.0,
+            float(predicted_price)
         )
 
-        # ====================================================
-        # STEP 13 — SAFETY CHECK
-        # ====================================================
+        lower_price = max(
+            0.0,
+            float(lower_price)
+        )
 
-        if lower_price < 0:
-            lower_price = 0.0
-
-        if predicted_price < 0:
-            predicted_price = 0.0
+        upper_price = max(
+            0.0,
+            float(upper_price)
+        )
 
         if upper_price < predicted_price:
+
             upper_price = predicted_price
+
+        if lower_price > predicted_price:
+
+            lower_price = predicted_price
 
         interval_width = (
             upper_price - lower_price
         )
 
         # ====================================================
-        # STEP 14 — RESPONSE
+        # 8. MODEL NAME
+        # ====================================================
+
+        model_name = AVAILABLE_MODELS[
+            selected_model
+        ]["name"]
+
+        # ====================================================
+        # 9. RESPONSE
         # ====================================================
 
         return {
+
             "predicted_price": round(
-                float(predicted_price),
+                predicted_price,
                 2
             ),
 
             "lower_bound": round(
-                float(lower_price),
+                lower_price,
                 2
             ),
 
             "upper_bound": round(
-                float(upper_price),
+                upper_price,
                 2
             ),
 
             "interval_width": round(
-                float(interval_width),
+                interval_width,
                 2
             ),
+
+            "model": selected_model,
+
+            "model_name": model_name,
 
             "inputs": {
                 feature: cleaned_features[feature]
@@ -642,4 +728,3 @@ def predict(request: PredictionRequest):
                 "error": str(e)
             }
         )
-
