@@ -1,23 +1,21 @@
-# Dataset
-data/
-
 # Python
 __pycache__/
 *.py[cod]
-*.so
-
-# Virtual environments
 .venv/
 venv/
 env/
-myenv/
 
 # Jupyter
 .ipynb_checkpoints/
 
-# Model artifacts
-models/
+# Next.js
+frontend/.next/
+frontend/node_modules/
 
-# OS files
+# Environment variables
+.env
+.env.local
+
+# OS
 .DS_Store
 Thumbs.db
